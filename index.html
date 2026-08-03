@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/styles.css">
+  <title>핸드폰 소음측정</title>
+</head>
+<body>
+  <header class="topbar">
+    <h1>🔊 핸드폰 소음측정</h1>
+    <button id="settings-toggle" class="icon-btn" title="설정">⚙️</button>
+  </header>
+
+  <!-- 설정 패널 -->
+  <section id="settings-panel" class="settings">
+    <div class="field">
+      <label>OpenWeatherMap API 키</label>
+      <input id="api-key" type="text" placeholder="API 키 입력" autocomplete="off">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>풀스케일 기준 (dB SPL, ISO)</label>
+        <input id="fullscale-input" type="number" step="1" value="120">
+        <small>0 dBFS ↔ dB SPL 환산 기준</small>
+      </div>
+      <div class="field">
+        <label>교정 오프셋 (dB)</label>
+        <input id="calib-offset" type="number" step="0.1" placeholder="0.0">
+        <small>기준계 − 앱값 미세보정</small>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>가중</label>
+        <select id="weighting-sel">
+          <option value="A">A-weighting</option>
+          <option value="Z">Linear (Z)</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-title">측정 조건</div>
+    <div class="field-row">
+      <div class="field">
+        <label>샘플레이트 (Hz)</label>
+        <select id="sr-sel">
+          <option value="auto">자동(기기 기본)</option>
+          <option value="48000">48000</option>
+          <option value="44100">44100</option>
+          <option value="32000">32000</option>
+          <option value="16000">16000</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>분해능 (Hz)</label>
+        <input id="res-input" type="number" step="0.5" value="2">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>오버랩 (%)</label>
+        <input id="overlap-input" type="number" step="5" value="75">
+      </div>
+      <div class="field">
+        <label>평균 횟수</label>
+        <input id="avg-input" type="number" step="1" value="81">
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <!-- 1) 기상 조건 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>기상 조건</h2>
+        <button id="wx-refresh" class="mini-btn">새로고침</button>
+      </div>
+      <div class="wx">
+        <span id="wx-icon" class="wx-icon">🌡️</span>
+        <span id="wx-temp" class="wx-temp">--℃</span>
+        <div class="wx-meta">
+          <div id="wx-desc">API 키 · GPS 권한 확인 중…</div>
+          <div id="wx-loc" class="muted"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2) 차량 GPS 속도 -->
+    <section class="card speed-card">
+      <h2>차량 속도 (GPS)</h2>
+      <div class="speed"><span id="speed-val">--</span><span class="unit">km/h</span></div>
+    </section>
+
+    <!-- 3) 타이어 / Cavity -->
+    <section class="card">
+      <h2>타이어 & Cavity 공명음</h2>
+      <label class="switch-row">
+        <input type="checkbox" id="gps-cavity-toggle" checked>
+        <span>GPS 속도로 Cavity 계산 <small class="muted">(끄면 기준속도 사용)</small></span>
+      </label>
+      <div class="field-row">
+        <div class="field">
+          <label>타이어 규격</label>
+          <input id="tire-input" type="text" placeholder="225/45R17">
+        </div>
+        <div class="field">
+          <label>기준속도 (GPS OFF/없을 때, km/h)</label>
+          <input id="refspeed-input" type="number" step="1" value="60">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>CV1 (1차 피크, Hz)</label>
+          <input id="cv1-input" type="number" step="0.1">
+        </div>
+        <div class="field">
+          <label>CV2 (2차 피크, Hz)</label>
+          <input id="cv2-input" type="number" step="0.1">
+        </div>
+      </div>
+      <div id="cv-note" class="muted"></div>
+    </section>
+
+    <!-- 측정 조건 요약 (본문) -->
+    <div id="cond-badge" class="cond-badge"></div>
+
+    <!-- 4) 결과 -->
+    <section id="result-section" class="result">
+      <!-- 레퍼런스 비교 안내 -->
+      <div class="ref-bar">
+        <span id="ref-info" class="muted">첫 측정이 레퍼런스로 고정됩니다</span>
+        <div class="btn-group">
+          <button id="ref-set" class="mini-btn">현재를 REF로</button>
+          <button id="ref-reset" class="mini-btn">REF 해제</button>
+        </div>
+      </div>
+
+      <!-- Road Noise -->
+      <div class="card">
+        <h2>Road Noise <small class="muted">A-weighting · Hanning · Autopower</small></h2>
+        <div class="rn-grid">
+          <div class="rn-cell">
+            <div class="rn-name">Overall</div>
+            <div id="rn-overall" class="rn-val">--</div>
+            <div id="rn-overall-d" class="rn-delta"></div>
+            <div class="rn-range">20–500Hz</div>
+          </div>
+          <div class="rn-cell">
+            <div class="rn-name">Booming</div>
+            <div id="rn-booming" class="rn-val">--</div>
+            <div id="rn-booming-d" class="rn-delta"></div>
+            <div id="lbl-booming" class="rn-range">20–CV1</div>
+          </div>
+          <div class="rn-cell">
+            <div class="rn-name">Cavity</div>
+            <div id="rn-cavity" class="rn-val">--</div>
+            <div id="rn-cavity-d" class="rn-delta"></div>
+            <div id="lbl-cavity" class="rn-range">CV1–CV2</div>
+          </div>
+          <div class="rn-cell">
+            <div class="rn-name">Rumble</div>
+            <div id="rn-rumble" class="rn-val">--</div>
+            <div id="rn-rumble-d" class="rn-delta"></div>
+            <div id="lbl-rumble" class="rn-range">CV2–500Hz</div>
+          </div>
+        </div>
+        <canvas id="autopower-canvas" class="chart"></canvas>
+        <div class="muted center">Autopower 스펙트럼 (20–500Hz) · 현재 vs Ref</div>
+      </div>
+
+      <!-- Pattern Noise -->
+      <div class="card">
+        <h2>Pattern Noise <small class="muted">1/3 Octave Line · 500–4000Hz</small></h2>
+        <div class="pn-rms-row">
+          <span class="pn-rms-label">RMS (500–4000Hz)</span>
+          <span id="pn-rms" class="pn-rms-val">--</span>
+          <span id="pn-rms-d" class="rn-delta"></span>
+        </div>
+        <canvas id="pattern-canvas" class="chart"></canvas>
+        <div id="seg-note" class="muted center"></div>
+      </div>
+
+      <div class="autosave-row">
+        <label class="switch-row"><input type="checkbox" id="autosave-toggle"> 자동저장</label>
+        <input id="autosave-name" type="text" class="autosave-name" placeholder="측정_001">
+      </div>
+      <button id="save-btn" class="save-btn" disabled>이 결과 저장</button>
+    </section>
+
+    <!-- 저장된 결과 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>저장된 결과 <small class="muted">(<span id="saved-count">0</span>건)</small></h2>
+        <div class="btn-group">
+          <button id="export-btn" class="mini-btn" disabled>결과 CSV</button>
+          <button id="spec-btn" class="mini-btn" disabled>스펙트럼 CSV</button>
+          <button id="clear-btn" class="mini-btn danger" disabled>전체 삭제</button>
+        </div>
+      </div>
+      <div id="saved-list" class="saved-list"></div>
+    </section>
+  </main>
+
+  <!-- 고정 측정 바 (항상 하단 노출) -->
+  <div id="measure-bar" class="measure-bar">
+    <button id="measure-btn" class="measure-btn">측정 시작 <small id="measure-dur">(10.5초)</small></button>
+    <div class="progress"><div id="progress-bar" class="progress-bar"></div></div>
+    <div class="measure-status">
+      <span id="countdown" class="countdown"></span>
+      <span id="status" class="muted">대기 중</span>
+      <span id="calib-badge" class="calib-badge">교정값 미적용 (0 dB)</span>
+    </div>
+  </div>
+
+  <script src="js/dsp.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
