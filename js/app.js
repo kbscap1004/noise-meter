@@ -17,6 +17,17 @@ const Settings = {
   // ISO 음압레벨 환산 기준: 디지털 풀스케일(=0 dBFS)에 해당하는 dB SPL
   get fullScaleDb(){ const v = parseFloat(LS.getItem('fullscale_db')); return isNaN(v) ? 120 : v; },
   set fullScaleDb(v){ LS.setItem('fullscale_db', String(v)); },
+  // 밴드별 미세보정(dB) — testlab 대비 편차 보정 (기본값=시험 편차)
+  get calOverall(){ const v=parseFloat(LS.getItem('cal_overall')); return isNaN(v)? 2.1 : v; },
+  set calOverall(v){ LS.setItem('cal_overall', String(v)); },
+  get calBooming(){ const v=parseFloat(LS.getItem('cal_booming')); return isNaN(v)? 2.5 : v; },
+  set calBooming(v){ LS.setItem('cal_booming', String(v)); },
+  get calCavity(){ const v=parseFloat(LS.getItem('cal_cavity')); return isNaN(v)? 3.5 : v; },
+  set calCavity(v){ LS.setItem('cal_cavity', String(v)); },
+  get calRumble(){ const v=parseFloat(LS.getItem('cal_rumble')); return isNaN(v)? 0.8 : v; },
+  set calRumble(v){ LS.setItem('cal_rumble', String(v)); },
+  get calPattern(){ const v=parseFloat(LS.getItem('cal_pattern')); return isNaN(v)? -0.4 : v; },
+  set calPattern(v){ LS.setItem('cal_pattern', String(v)); },
   get weighting(){ return LS.getItem('weighting') || 'A'; },   // 'A' | 'Z'
   set weighting(v){ LS.setItem('weighting', v); },
   get fftSize()  { return parseInt(LS.getItem('fft_size') || '16384', 10); },
@@ -144,35 +155,45 @@ function startGPS() {
   }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
 }
 
-/* ================= 날씨 (OpenWeatherMap) ================= */
+/* ================= 날씨 (Open-Meteo, API 키 불필요) ================= */
 async function fetchWeather() {
-  const key = Settings.apiKey;
-  if (!key) { $('wx-desc').textContent = '설정에서 OpenWeatherMap API 키를 입력하세요'; return; }
   if (State.lat == null) { $('wx-desc').textContent = 'GPS 위치 확보 중…'; return; }
   try {
-    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${State.lat}` +
-      `&lon=${State.lon}&units=metric&lang=kr&appid=${key}`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${State.lat}` +
+      `&longitude=${State.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,` +
+      `weather_code,wind_speed_10m&timezone=auto`;
     const r = await fetch(url);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
-    State.tempC = d.main.temp;
-    $('wx-temp').textContent = d.main.temp.toFixed(1) + '℃';
-    $('wx-desc').textContent = (d.weather && d.weather[0] ? d.weather[0].description : '') +
-      `  ·  습도 ${d.main.humidity}%`;
-    $('wx-loc').textContent = d.name || `${State.lat.toFixed(3)}, ${State.lon.toFixed(3)}`;
-    if (d.weather && d.weather[0]) {
-      $('wx-icon').textContent = weatherEmoji(d.weather[0].icon);
-    }
-    recomputeCavity(); // 온도 반영 → 음속/공명 재계산
+    const c = d.current;
+    State.tempC = c.temperature_2m;
+    const wc = wmo(c.weather_code);
+    $('wx-temp').textContent = c.temperature_2m.toFixed(1) + '℃';
+    $('wx-icon').textContent = wc.emoji;
+    $('wx-desc').textContent = `${wc.desc} · 습도 ${Math.round(c.relative_humidity_2m)}% · ` +
+      `체감 ${c.apparent_temperature.toFixed(0)}℃ · 바람 ${c.wind_speed_10m.toFixed(0)}km/h`;
+    $('wx-loc').textContent = `${State.lat.toFixed(3)}, ${State.lon.toFixed(3)} · Open-Meteo`;
+    State.weatherStr = `${wc.desc} ${c.temperature_2m.toFixed(1)}℃ 습도${Math.round(c.relative_humidity_2m)}%`;
   } catch (e) {
     $('wx-desc').textContent = '날씨 조회 실패: ' + e.message;
   }
 }
 
-function weatherEmoji(icon) {
-  const c = (icon || '').slice(0, 2);
-  return ({ '01':'☀️','02':'🌤️','03':'☁️','04':'☁️','09':'🌧️',
-            '10':'🌦️','11':'⛈️','13':'❄️','50':'🌫️' })[c] || '🌡️';
+// WMO weather code → 설명/이모지
+function wmo(code) {
+  const m = {
+    0:['맑음','☀️'],1:['대체로 맑음','🌤️'],2:['구름 조금','⛅'],3:['흐림','☁️'],
+    45:['안개','🌫️'],48:['상고대 안개','🌫️'],
+    51:['약한 이슬비','🌦️'],53:['이슬비','🌦️'],55:['짙은 이슬비','🌦️'],
+    56:['어는 이슬비','🌧️'],57:['짙은 어는 이슬비','🌧️'],
+    61:['약한 비','🌧️'],63:['비','🌧️'],65:['강한 비','🌧️'],
+    66:['어는 비','🌧️'],67:['강한 어는 비','🌧️'],
+    71:['약한 눈','❄️'],73:['눈','❄️'],75:['강한 눈','❄️'],77:['싸락눈','❄️'],
+    80:['약한 소나기','🌦️'],81:['소나기','🌦️'],82:['강한 소나기','🌧️'],
+    85:['약한 눈소나기','❄️'],86:['강한 눈소나기','❄️'],
+    95:['뇌우','⛈️'],96:['우박 동반 뇌우','⛈️'],99:['강한 우박 뇌우','⛈️']
+  };
+  return { desc: (m[code] ? m[code][0] : '—'), emoji: (m[code] ? m[code][1] : '🌡️') };
 }
 
 /* ================= 측정 ================= */
@@ -285,13 +306,18 @@ function analyze(samples, fs) {
   const bLo = cv1 + CAV_LO_OFF;   // Cavity 하한 = CV1+8
   const bHi = cv2 + CAV_HI_OFF;   // Cavity 상한 = CV2+35
 
-  // Road Noise 대역 레벨
+  // Road Noise 대역 레벨 (+ 밴드별 미세보정: testlab 편차)
   const overall = DSP.bandLevel(gxx, df, 20, 500, weightFn, offset);
   const booming = DSP.bandLevel(gxx, df, 20, bLo, weightFn, offset);
   const cavity  = DSP.bandLevel(gxx, df, bLo, bHi, weightFn, offset);
   const rumble  = DSP.bandLevel(gxx, df, bHi, 500, weightFn, offset);
+  overall.level += Settings.calOverall;
+  booming.level += Settings.calBooming;
+  cavity.level  += Settings.calCavity;
+  rumble.level  += Settings.calRumble;
   // Pattern Noise RMS (500–4000Hz) + 1/3 옥타브
   const patternRms = DSP.bandLevel(gxx, df, PN_LO, PN_HI, weightFn, offset);
+  patternRms.level += Settings.calPattern;
   const bands = DSP.thirdOctaveBands(gxx, df, PN_LO, PN_HI, weightFn, offset);
 
   $('seg-note').innerHTML =
@@ -373,9 +399,9 @@ function renderComparison() {
   setDelta($('pn-rms-d'), isRef ? null : cur.result.patternRms - ref.result.patternRms);
 
   // 그래프: 레퍼런스(회색) + 현재(색). 첫 측정이면 현재만.
+  // CV1/CV2 라인 숨김(marks=null), Road Noise Y축 하단 25 고정
   const refSpec = isRef ? null : ref;
-  drawSpectrum($('autopower-canvas'), cur, refSpec, 20, 500,
-    [{ f: cur.cv1, label: 'CV1' }, { f: cur.cv2, label: 'CV2' }]);
+  drawSpectrum($('autopower-canvas'), cur, refSpec, 20, 500, null, 25);
   drawThirdOctaveLine($('pattern-canvas'), cur, refSpec);
 }
 
@@ -419,8 +445,9 @@ function gridStep(range) {
   return 200;
 }
 
-// gxx → 레벨(dB) 배열
+// gxx(또는 저장된 curve) → 레벨(dB) 배열
 function specLevels(snap, fLo, fHi) {
+  if (snap.curve) return snap.curve.filter(p => p.f >= fLo && p.f <= fHi);
   const { gxx, df, weightFn, offset } = snap;
   const kLo = Math.max(1, Math.ceil(fLo / df));
   const kHi = Math.min(gxx.length - 1, Math.floor(fHi / df));
@@ -432,8 +459,8 @@ function specLevels(snap, fLo, fHi) {
   return out;
 }
 
-// 선 스펙트럼: 현재(cur) + 레퍼런스(ref, 회색) 오버레이
-function drawSpectrum(cv, cur, ref, fLo, fHi, marks) {
+// 선 스펙트럼: 현재(cur) + 레퍼런스(ref, 회색) 오버레이. yFloor 지정 시 Y축 하단 고정
+function drawSpectrum(cv, cur, ref, fLo, fHi, marks, yFloor) {
   const { ctx, w, h } = prepCanvas(cv);
   const padL = 46, padR = 10, padT = 12, padB = 26;
   const plotW = w - padL - padR, plotH = h - padT - padB;
@@ -443,8 +470,14 @@ function drawSpectrum(cv, cur, ref, fLo, fHi, marks) {
   let ymin = Infinity, ymax = -Infinity;
   const scan = (arr) => arr.forEach(p => { if (p.L < ymin) ymin = p.L; if (p.L > ymax) ymax = p.L; });
   scan(curL); if (refL) scan(refL);
-  if (ymax - ymin > 80) ymin = ymax - 80; // 표시 동적범위 80dB 제한
-  const yr = niceRange(ymin, ymax);
+  let yr;
+  if (yFloor != null) {
+    const hi = Math.ceil((ymax + 3) / 5) * 5;
+    yr = { lo: yFloor, hi: Math.max(hi, yFloor + 10) };
+  } else {
+    if (ymax - ymin > 80) ymin = ymax - 80; // 표시 동적범위 80dB 제한
+    yr = niceRange(ymin, ymax);
+  }
   const x = (f) => padL + ((f - fLo) / (fHi - fLo)) * plotW;
   const y = (L) => padT + (1 - (L - yr.lo) / (yr.hi - yr.lo)) * plotH;
 
@@ -603,7 +636,7 @@ function renderSaved() {
     const t = new Date(r.time);
     const ts = `${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
     return `<div class="saved-item">
-      <div class="saved-main">
+      <div class="saved-main clickable" data-view="${i}" title="눌러서 결과 보기">
         <b>${r.name || ts}</b> <span class="muted">${ts} · ${(r.speedKmh??0).toFixed(0)}km/h · ${r.tire||''}</span>
         <div class="muted">OA ${r.roadNoise.overall.toFixed(1)} / Bo ${r.roadNoise.booming.toFixed(1)} / Ca ${r.roadNoise.cavity.toFixed(1)} / Ru ${r.roadNoise.rumble.toFixed(1)} / PN ${(r.patternRms??0).toFixed(1)} ${unit(r.weighting)}</div>
       </div>
@@ -612,6 +645,34 @@ function renderSaved() {
   }).join('');
   list.querySelectorAll('.del-btn').forEach(b =>
     b.addEventListener('click', () => deleteSaved(parseInt(b.dataset.idx, 10))));
+  list.querySelectorAll('.saved-main[data-view]').forEach(el =>
+    el.addEventListener('click', () => viewSaved(parseInt(el.dataset.view, 10))));
+}
+
+// 저장된 결과 → 스냅(그래프 재구성용)
+function snapFromSaved(r) {
+  const curve = (r.spectrum && r.spectrum.L)
+    ? r.spectrum.L.map((L, i) => ({ f: +(r.spectrum.fLo + i * r.spectrum.df).toFixed(1), L }))
+    : [];
+  const bands = (r.thirdOctave || []).map(b => ({ fc: b.fc, level: b.level }));
+  return { result: r, curve, bands, cv1: r.cv1, cv2: r.cv2 };
+}
+
+// 저장된 결과 보기 (Road/Pattern Noise + 그래프 재현)
+function viewSaved(idx) {
+  const arr = getSaved();
+  const r = arr[idx];
+  if (!r) return;
+  State.current = snapFromSaved(r);
+  renderComparison();
+  const t = new Date(r.time);
+  const ts = `${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`;
+  $('seg-note').innerHTML =
+    `📁 저장결과: <b>${r.name || ''}</b> · ${ts} · ${(r.speedKmh??0).toFixed(0)}km/h · ${r.tire||''} · ` +
+    `${r.weighting==='A'?'A-weighting':'Linear'}` + (r.weather ? ` · ${r.weather}` : '');
+  setStatus(`저장결과 보기: ${r.name || ''} (${ts})`);
+  const rs = $('result-section');
+  if (rs && rs.scrollIntoView) rs.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function exportCsv() {
@@ -683,6 +744,11 @@ function init() {
   $('api-key').value = Settings.apiKey;
   $('calib-offset').value = Settings.offset;
   $('fullscale-input').value = Settings.fullScaleDb;
+  $('cal-overall').value = Settings.calOverall;
+  $('cal-booming').value = Settings.calBooming;
+  $('cal-cavity').value = Settings.calCavity;
+  $('cal-rumble').value = Settings.calRumble;
+  $('cal-pattern').value = Settings.calPattern;
   $('weighting-sel').value = Settings.weighting;
   $('res-input').value = Settings.resHz;
   $('overlap-input').value = Math.round(Settings.overlap * 100);
@@ -716,6 +782,14 @@ function init() {
     Settings.fullScaleDb = parseFloat(e.target.value) || 0;
     e.target.value = Settings.fullScaleDb;
   });
+  const calBind = (id, setter) => $(id).addEventListener('change', (e) => {
+    const v = parseFloat(e.target.value) || 0; setter(v); e.target.value = v;
+  });
+  calBind('cal-overall', v => Settings.calOverall = v);
+  calBind('cal-booming', v => Settings.calBooming = v);
+  calBind('cal-cavity',  v => Settings.calCavity  = v);
+  calBind('cal-rumble',  v => Settings.calRumble  = v);
+  calBind('cal-pattern', v => Settings.calPattern = v);
   $('weighting-sel').addEventListener('change', (e) => { Settings.weighting = e.target.value; });
   $('res-input').addEventListener('change', (e) => { Settings.resHz = parseFloat(e.target.value) || 2; updateCondBadge(); });
   $('overlap-input').addEventListener('change', (e) => {
