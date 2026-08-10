@@ -17,8 +17,9 @@
   <!-- 설정 패널 -->
   <section id="settings-panel" class="settings">
     <div class="field">
-      <label>OpenWeatherMap API 키</label>
-      <input id="api-key" type="text" placeholder="API 키 입력" autocomplete="off">
+      <label>날씨</label>
+      <input id="api-key" type="hidden">
+      <small>자동 (Open-Meteo · GPS 위치 · API 키 불필요)</small>
     </div>
     <div class="field-row">
       <div class="field">
@@ -40,6 +41,16 @@
           <option value="Z">Linear (Z)</option>
         </select>
       </div>
+    </div>
+    <div class="settings-title">밴드 보정 (dB, testlab 편차)</div>
+    <div class="field-row">
+      <div class="field"><label>Overall</label><input id="cal-overall" type="number" step="0.1" value="2.1"></div>
+      <div class="field"><label>Booming</label><input id="cal-booming" type="number" step="0.1" value="2.5"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Cavity</label><input id="cal-cavity" type="number" step="0.1" value="3.5"></div>
+      <div class="field"><label>Rumble</label><input id="cal-rumble" type="number" step="0.1" value="0.8"></div>
+      <div class="field"><label>Pattern</label><input id="cal-pattern" type="number" step="0.1" value="-0.4"></div>
     </div>
     <div class="settings-title">측정 조건</div>
     <div class="field-row">
