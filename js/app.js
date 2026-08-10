@@ -7,6 +7,7 @@
 
 const $ = (id) => document.getElementById(id);
 const LS = window.localStorage;
+let deferredInstall = null;  // PWA 설치 프롬프트 보관
 
 /* ================= 설정(로컬 저장) ================= */
 const Settings = {
@@ -819,14 +820,31 @@ function init() {
     $('settings-panel').classList.toggle('open');
   });
 
-  // 서비스워커 제거(캐시 staleness 방지) — 항상 네트워크에서 최신 로드
+  // 서비스워커 등록 (네트워크 우선 → 항상 최신 + 오프라인 + PWA 설치 가능)
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations()
-      .then(rs => rs.forEach(r => r.unregister())).catch(() => {});
-    if (window.caches && caches.keys) {
-      caches.keys().then(keys => keys.forEach(k => caches.delete(k))).catch(() => {});
-    }
+    navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+
+  // PWA 설치 버튼
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstall = e;
+    const b = $('install-btn'); if (b) b.style.display = '';
+  });
+  $('install-btn').addEventListener('click', async () => {
+    if (!deferredInstall) {
+      alert('브라우저 메뉴(⋮) → "앱 설치" 또는 "홈 화면에 추가"를 눌러 설치하세요.');
+      return;
+    }
+    deferredInstall.prompt();
+    await deferredInstall.userChoice;
+    deferredInstall = null;
+    $('install-btn').style.display = 'none';
+  });
+  window.addEventListener('appinstalled', () => {
+    const b = $('install-btn'); if (b) b.style.display = 'none';
+    setStatus('앱이 설치되었습니다');
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);
