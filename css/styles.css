@@ -35,6 +35,12 @@ body {
   font-family: inherit;
 }
 .icon-btn { background: transparent; font-size: 20px; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.install-btn {
+  background: var(--accent); color: #fff; border: none; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 700;
+  padding: 7px 12px; border-radius: 8px;
+}
 .mini-btn {
   background: var(--card2); border: 1px solid var(--line);
   padding: 5px 10px; border-radius: 8px; font-size: 12px;
