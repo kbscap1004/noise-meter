@@ -160,6 +160,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
 }
 .saved-main { font-size: 13px; line-height: 1.5; }
+.saved-main.clickable { cursor: pointer; border-radius: 8px; padding: 4px 6px; margin: -4px -6px; transition: background .15s; }
+.saved-main.clickable:hover, .saved-main.clickable:active { background: rgba(59,130,246,.12); }
 .del-btn {
   border: none; background: transparent; color: #fca5a5; font-size: 16px; cursor: pointer;
   padding: 4px 8px; flex-shrink: 0;
