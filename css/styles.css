@@ -69,7 +69,7 @@ main { padding: 12px; display: flex; flex-direction: column; gap: 12px; max-widt
   transition: max-height .25s ease, padding .25s ease;
   padding: 0 16px;
 }
-.settings.open { max-height: 400px; padding: 14px 16px; }
+.settings.open { max-height: 1600px; padding: 14px 16px; overflow-y: auto; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; flex: 1; }
 .field label { font-size: 12px; color: var(--muted); }
 .field small { font-size: 11px; color: var(--muted); }
