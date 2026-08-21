@@ -326,9 +326,16 @@ function analyze(samples, fs) {
     `Δf=${df.toFixed(1)}Hz · 오버랩 ${(Settings.overlap*100).toFixed(0)}% · 평균 ${segments}회 · Hanning · ` +
     `${Settings.weighting==='A'?'A-weighting':'Linear'} · 기준 ${Settings.fullScaleDb}dB · 입력 ${inDbfs.toFixed(0)}dBFS`;
 
+  // 측정 음원(WAV) 보관 — 재생/저장/IndexedDB
+  const nowIso = new Date().toISOString();
+  const audioName = 'noise_' + nowIso.replace(/[-:T]/g, '').slice(0, 13);
+  AudioX.setFromSamples(samples, fs, audioName);
+  idbPut(nowIso, AudioX.wavBlob).catch(() => {});
+  enableAudioUI(true);
+
   // 결과 객체 (저장/비교 공통)
   const result = {
-    time: new Date().toISOString(),
+    time: nowIso, audioId: nowIso,
     tempC: State.tempC, weather: $('wx-desc').textContent, location: $('wx-loc').textContent,
     speedKmh: State.measureSpeed, speedSrc: (State.gpsSpeed != null) ? 'GPS' : 'manual',
     tire: $('tire-input').value, cv1, cv2, cavLoOff: CAV_LO_OFF, cavHiOff: CAV_HI_OFF,
@@ -613,14 +620,17 @@ function saveCurrentResult(auto) {
 
 function deleteSaved(idx) {
   const arr = getSaved();
+  const r = arr[idx];
+  if (r && r.audioId) idbDel(r.audioId).catch(() => {});
   arr.splice(idx, 1);
   setSaved(arr);
   renderSaved();
 }
 
 function clearSaved() {
-  if (!confirm('저장된 모든 결과를 삭제할까요?')) return;
+  if (!confirm('저장된 모든 결과를 삭제할까요? (음원 포함)')) return;
   setSaved([]);
+  idbClear().catch(() => {});
   renderSaved();
 }
 
@@ -672,6 +682,13 @@ function viewSaved(idx) {
     `📁 저장결과: <b>${r.name || ''}</b> · ${ts} · ${(r.speedKmh??0).toFixed(0)}km/h · ${r.tire||''} · ` +
     `${r.weighting==='A'?'A-weighting':'Linear'}` + (r.weather ? ` · ${r.weather}` : '');
   setStatus(`저장결과 보기: ${r.name || ''} (${ts})`);
+  // 저장된 음원 로드 (있으면 재생/저장 가능)
+  AudioX.clear(); enableAudioUI(false);
+  if (r.audioId) {
+    idbGet(r.audioId).then(blob => {
+      if (blob) { AudioX.setFromBlob(blob, r.name || 'saved').then(() => enableAudioUI(true)); }
+    }).catch(() => {});
+  }
   const rs = $('result-section');
   if (rs && rs.scrollIntoView) rs.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -735,6 +752,100 @@ function downloadCsv(body, prefix) {
 }
 
 function fmt(v) { return (v == null || isNaN(v)) ? '' : (+v).toFixed(2); }
+
+/* ================= 음원 (WAV 저장 / 재생) ================= */
+const AudioX = {
+  ctx: null, src: null, buffer: null, wavBlob: null, rate: 48000, name: 'measure', peak: 1,
+  getCtx() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); return this.ctx; },
+  setFromSamples(samples, rate, name) {
+    const s = Float32Array.from(samples);
+    const buf = this.getCtx().createBuffer(1, s.length, rate);
+    buf.copyToChannel(s, 0);
+    this.buffer = buf; this.rate = rate; this.name = name || 'measure';
+    this.wavBlob = encodeWav(s, rate);
+    let pk = 0; for (let i = 0; i < s.length; i++) { const a = Math.abs(s[i]); if (a > pk) pk = a; }
+    this.peak = pk || 1;
+  },
+  async setFromBlob(blob, name) {
+    const arr = await blob.arrayBuffer();
+    this.buffer = await this.getCtx().decodeAudioData(arr.slice(0));
+    this.rate = this.buffer.sampleRate; this.name = name || 'measure'; this.wavBlob = blob;
+    const ch = this.buffer.getChannelData(0);
+    let pk = 0; for (let i = 0; i < ch.length; i++) { const a = Math.abs(ch[i]); if (a > pk) pk = a; }
+    this.peak = pk || 1;
+  },
+  stop() { if (this.src) { try { this.src.stop(); } catch (e) {} this.src = null; } updatePlayUI(); },
+  async play(centerFreq, q) {
+    if (!this.buffer) return;
+    this.stop();
+    const ctx = this.getCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+    const src = ctx.createBufferSource(); src.buffer = this.buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = Math.min(20, 0.9 / this.peak); // 재생 정규화(원시신호가 작아 들리게)
+    let node = src;
+    if (centerFreq) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = centerFreq; bp.Q.value = q || 8;
+      src.connect(bp); node = bp;
+    }
+    node.connect(gain); gain.connect(ctx.destination);
+    src.onended = () => { if (this.src === src) { this.src = null; updatePlayUI(); } };
+    src.start(); this.src = src; updatePlayUI();
+  },
+  clear() { this.stop(); this.buffer = null; this.wavBlob = null; },
+  download() {
+    if (!this.wavBlob) return;
+    const url = URL.createObjectURL(this.wavBlob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = (this.name || 'measure').replace(/[\\/:*?"<>|]/g, '_') + '.wav';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+};
+
+// Float32 → 16bit PCM WAV Blob
+function encodeWav(samples, rate) {
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); ws(8, 'WAVE');
+  ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  ws(36, 'data'); v.setUint32(40, n * 2, true);
+  let o = 44;
+  for (let i = 0; i < n; i++) { let s = Math.max(-1, Math.min(1, samples[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7FFF, true); o += 2; }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+// IndexedDB: 측정별 WAV 보관
+function idb(fn) {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('noiseAudio', 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('wav')) r.result.createObjectStore('wav'); };
+    r.onsuccess = () => fn(r.result, res, rej);
+    r.onerror = () => rej(r.error);
+  });
+}
+function idbPut(id, blob) { return idb((db, res, rej) => { const tx = db.transaction('wav', 'readwrite'); tx.objectStore('wav').put(blob, id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+function idbGet(id) { return idb((db, res, rej) => { const tx = db.transaction('wav', 'readonly'); const g = tx.objectStore('wav').get(id); g.onsuccess = () => res(g.result || null); g.onerror = () => rej(g.error); }); }
+function idbDel(id) { return idb((db, res, rej) => { const tx = db.transaction('wav', 'readwrite'); tx.objectStore('wav').delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+function idbClear() { return idb((db, res, rej) => { const tx = db.transaction('wav', 'readwrite'); tx.objectStore('wav').clear(); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+
+function enableAudioUI(on) {
+  ['play-full', 'play-band', 'wav-save'].forEach(id => { const b = $(id); if (b) b.disabled = !on; });
+  const info = $('audio-info');
+  if (info) info.textContent = on ? `${(AudioX.buffer ? AudioX.buffer.duration : 0).toFixed(1)}초 · ${AudioX.rate}Hz` : '측정 후 사용 가능';
+  updatePlayUI();
+}
+function updatePlayUI() {
+  const s = $('play-stop'); if (s) s.disabled = !(AudioX.src);
+}
+function bandFreqPreset(kind) {
+  const f = (kind === 'cv1') ? State.cv1 : (kind === 'cv2') ? State.cv2 : (State.cv1 + State.cv2) / 2;
+  if (f && isFinite(f)) $('band-freq').value = f.toFixed(0);
+}
 
 /* ================= 초기화 / 이벤트 ================= */
 function init() {
@@ -815,6 +926,19 @@ function init() {
   // 레퍼런스 제어
   $('ref-reset').addEventListener('click', clearReference);
   $('ref-set').addEventListener('click', setReferenceToCurrent);
+
+  // 음원 재생 / 저장
+  $('play-full').addEventListener('click', () => AudioX.play());
+  $('play-band').addEventListener('click', () => {
+    const f = parseFloat($('band-freq').value);
+    const q = parseFloat($('band-q').value) || 8;
+    if (f > 0) AudioX.play(f, q);
+  });
+  $('play-stop').addEventListener('click', () => AudioX.stop());
+  $('wav-save').addEventListener('click', () => AudioX.download());
+  document.querySelectorAll('#audio-card .chip').forEach(c =>
+    c.addEventListener('click', () => bandFreqPreset(c.dataset.f)));
+  enableAudioUI(false);
 
   $('settings-toggle').addEventListener('click', () => {
     $('settings-panel').classList.toggle('open');
