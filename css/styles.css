@@ -152,6 +152,17 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   padding: 14px; border-radius: var(--radius);
 }
 .save-btn:disabled { opacity: .4; cursor: default; }
+/* 음원 카드 */
+.audio-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.audio-lbl { font-size: 12px; color: var(--muted); }
+.audio-num { width: 90px; }
+.audio-num-sm { width: 56px; }
+.chip {
+  background: var(--card2); border: 1px solid var(--line); color: var(--text);
+  font-family: inherit; font-size: 12px; padding: 5px 10px; border-radius: 999px; cursor: pointer;
+}
+.chip:active { background: rgba(59,130,246,.2); }
+
 .autosave-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .autosave-row .switch-row { margin-bottom: 0; white-space: nowrap; }
 .autosave-name { flex: 1; }
