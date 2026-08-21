@@ -196,6 +196,29 @@
         <div id="seg-note" class="muted center"></div>
       </div>
 
+      <!-- 음원 (WAV) -->
+      <div class="card" id="audio-card">
+        <h2>측정 음원 (WAV) <small class="muted" id="audio-info">측정 후 사용 가능</small></h2>
+        <div class="audio-row">
+          <button id="play-full" class="mini-btn" disabled>▶ 전체 재생</button>
+          <button id="play-stop" class="mini-btn" disabled>■ 정지</button>
+          <button id="wav-save" class="mini-btn" disabled>WAV 저장</button>
+        </div>
+        <div class="audio-row">
+          <span class="audio-lbl">대역재생 중심(Hz)</span>
+          <input id="band-freq" type="number" value="200" step="10" class="audio-num">
+          <span class="audio-lbl">Q</span>
+          <input id="band-q" type="number" value="8" step="1" class="audio-num-sm">
+          <button id="play-band" class="mini-btn" disabled>▶ 대역 재생</button>
+        </div>
+        <div class="audio-row">
+          <span class="audio-lbl">프리셋:</span>
+          <button class="chip" data-f="cv1">CV1</button>
+          <button class="chip" data-f="cv2">CV2</button>
+          <button class="chip" data-f="cavity">Cavity중심</button>
+        </div>
+      </div>
+
       <div class="autosave-row">
         <label class="switch-row"><input type="checkbox" id="autosave-toggle"> 자동저장</label>
         <input id="autosave-name" type="text" class="autosave-name" placeholder="측정_001">
